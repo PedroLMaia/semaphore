@@ -1,2 +1,37 @@
-<p>Task {{ .Task.ID }} with template '{{ .Name }}' has failed!</p>
-<p>Task Log: <a href="{{ .Task.URL }}">Link</a></p>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alerta de Task</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 15px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #d9534f;
+        }
+        pre {
+            background-color: #eef;
+            padding: 5px;
+            border-radius: px;
+            white-space: pre-line;
+        }
+    </style>
+</head>
+<body>
+    <h1>Task '{{.Alert.Name}}' falhou!</h1>
+    <p><strong>ID:</strong> {{.Alert.Task.ID}}</p>
+    <p><strong>Status:</strong> {{.Alert.Task.Result}}</p>
+    <p><strong>Autor:</strong> {{.Alert.Author}}</p>
+    <p><strong>Versão:</strong> {{.Alert.Task.Version}}</p>
+    <p><strong>Descrição:</strong> {{.Alert.Task.Desc}}</p>
+    <h2>Logs da Task:</h2>
+    <pre>{{.Logs}}</pre>
+</body>
+</html>
