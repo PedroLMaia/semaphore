@@ -1,6 +1,8 @@
 package tasks
 
 import (
+	"time"
+	"strings"
 	"bytes"
 	"embed"
 	"fmt"
@@ -39,74 +41,82 @@ type alertChat struct {
 }
 
 func (t *TaskRunner) sendMailAlert() {
-	if !util.Config.EmailAlert || !t.alert {
-		return
-	}
+    if !util.Config.EmailAlert || !t.alert {
+        return
+    }
 
-	body := bytes.NewBufferString("")
-	author, version := t.alertInfos()
+    body := bytes.NewBufferString("")
+    author, version := t.alertInfos()
 
-	alert := Alert{
-		Name:   t.Template.Name,
-		Author: author,
-		Color:  t.alertColor("email"),
-		Task: alertTask{
-			ID:      strconv.Itoa(t.Task.ID),
-			URL:     t.taskLink(),
-			Result:  t.Task.Status.Format(),
-			Version: version,
-			Desc:    t.Task.Message,
-		},
-	}
+    // Obter os logs da task
+    taskOutputs, err := t.pool.store.GetTaskOutputs(t.Task.ProjectID, t.Task.ID)
+    if err != nil {
+        t.Log("Não foi possível recuperar os logs da task!")
+        return
+    }
 
-	tpl, err := template.ParseFS(templates, "templates/email.tmpl")
+    // Construir uma string com os logs
+    var logBuffer strings.Builder
+    for _, output := range taskOutputs {
+        logBuffer.WriteString(fmt.Sprintf("[%s] %s\n", output.Time.Format(time.RFC3339), output.Output))
+    }
 
-	if err != nil {
-		t.Log("Can't parse email alert template!")
-		panic(err)
-	}
+    alert := Alert{
+        Name:   t.Template.Name,
+        Author: author,
+        Color:  t.alertColor("email"),
+        Task: alertTask{
+            ID:      strconv.Itoa(t.Task.ID),
+            Result:  t.Task.Status.Format(),
+            Version: version,
+            Desc:    t.Task.Message,
+        },
+    }
 
-	if err := tpl.Execute(body, alert); err != nil {
-		t.Log("Can't generate email alert template!")
-		panic(err)
-	}
+    // Adicionar os logs ao corpo do email
+    emailBody := fmt.Sprintf("Task '%s' falhou!\n\nLogs:\n%s", t.Template.Name, logBuffer.String())
 
-	if body.Len() == 0 {
-		t.Log("Buffer for email alert is empty")
-		return
-	}
+    tpl, err := template.ParseFS(templates, "templates/email.tmpl")
+    if err != nil {
+        t.Log("Não foi possível analisar o template do alerta por email!")
+        return
+    }
 
-	for _, uid := range t.users {
-		user, err := t.pool.store.GetUser(uid)
+    // Execute o template com o corpo do email
+    if err := tpl.Execute(body, alert); err != nil {
+        t.Log("Não foi possível gerar o template do alerta por email!")
+        return
+    }
 
-		if !user.Alert {
-			continue
-		}
+    // Enviar email para os usuários
+    for _, uid := range t.users {
+        user, err := t.pool.store.GetUser(uid)
+        if err != nil {
+            t.Logf("Erro ao obter usuário: %v", err)
+            continue
+        }
+        if !user.Alert {
+            continue
+        }
 
-		if err != nil {
-			util.LogError(err)
-			continue
-		}
+        t.Logf("Tentando enviar alerta por email para %s", user.Email)
+        if err := mailer.Send(
+            util.Config.EmailSecure,
+            util.Config.EmailHost,
+            util.Config.EmailPort,
+            util.Config.EmailUsername,
+            util.Config.EmailPassword,
+            util.Config.EmailSender,
+            user.Email,
+            fmt.Sprintf("Task '%s' falhou", t.Template.Name),
+            emailBody, // Enviar o corpo do email com os logs
+        ); err != nil {
+            util.LogError(err)
+            continue
+        }
 
-		t.Logf("Attempting to send email alert to %s", user.Email)
-
-		if err := mailer.Send(
-			util.Config.EmailSecure,
-			util.Config.EmailHost,
-			util.Config.EmailPort,
-			util.Config.EmailUsername,
-			util.Config.EmailPassword,
-			util.Config.EmailSender,
-			user.Email,
-			fmt.Sprintf("Task '%s' failed", t.Template.Name),
-			body.String(),
-		); err != nil {
-			util.LogError(err)
-			continue
-		}
-
-		t.Logf("Sent successfully email alert to %s", user.Email)
-	}
+        t.Logf("Alerta por email enviado com sucesso para %s", user.Email)
+    }
 }
 
 func (t *TaskRunner) sendTelegramAlert() {
