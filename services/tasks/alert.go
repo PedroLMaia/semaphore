@@ -1,7 +1,6 @@
 package tasks
 
 import (
-	"time"
 	"strings"
 	"bytes"
 	"embed"
@@ -9,7 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"text/template"
-
+	"time"
 	"github.com/semaphoreui/semaphore/db"
 	"github.com/semaphoreui/semaphore/pkg/task_logger"
 	"github.com/semaphoreui/semaphore/util"
@@ -45,9 +44,6 @@ func (t *TaskRunner) sendMailAlert() {
         return
     }
 
-    body := bytes.NewBufferString("")
-    author, version := t.alertInfos()
-
     // Obter os logs da task
     taskOutputs, err := t.pool.store.GetTaskOutputs(t.Task.ProjectID, t.Task.ID)
     if err != nil {
@@ -55,11 +51,21 @@ func (t *TaskRunner) sendMailAlert() {
         return
     }
 
-    // Construir uma string com os logs
+	brLocation, err := time.LoadLocation("America/Sao_Paulo")
+    if err != nil {
+        t.Log("Não foi possível carregar o fuso horário de Brasília!")
+        return
+    }
+    // Construir uma string com os logs formatados
     var logBuffer strings.Builder
     for _, output := range taskOutputs {
-        logBuffer.WriteString(fmt.Sprintf("[%s] %s\n", output.Time.Format(time.RFC3339), output.Output))
+        // Converter a hora para o fuso horário de Brasília
+        localTime := output.Time.In(brLocation)
+        timeStr := localTime.Format("[03:04:05 PM]")
+        logBuffer.WriteString(fmt.Sprintf("%s   %s\n", timeStr, output.Output))
     }
+
+    author, version := t.alertInfos()
 
     alert := Alert{
         Name:   t.Template.Name,
@@ -73,8 +79,14 @@ func (t *TaskRunner) sendMailAlert() {
         },
     }
 
-    // Adicionar os logs ao corpo do email
-    emailBody := fmt.Sprintf("Task '%s' falhou!\n\nLogs:\n%s", t.Template.Name, logBuffer.String())
+    // Criar um buffer para o corpo do email
+    body := new(bytes.Buffer)
+
+    // Criar um mapa com os dados para o template
+    templateData := map[string]interface{}{
+        "Alert": alert,
+        "Logs":  logBuffer.String(),
+    }
 
     tpl, err := template.ParseFS(templates, "templates/email.tmpl")
     if err != nil {
@@ -82,8 +94,8 @@ func (t *TaskRunner) sendMailAlert() {
         return
     }
 
-    // Execute o template com o corpo do email
-    if err := tpl.Execute(body, alert); err != nil {
+    // Execute o template com os dados
+    if err := tpl.Execute(body, templateData); err != nil {
         t.Log("Não foi possível gerar o template do alerta por email!")
         return
     }
@@ -109,7 +121,7 @@ func (t *TaskRunner) sendMailAlert() {
             util.Config.EmailSender,
             user.Email,
             fmt.Sprintf("Task '%s' falhou", t.Template.Name),
-            emailBody, // Enviar o corpo do email com os logs
+            body.String(),
         ); err != nil {
             util.LogError(err)
             continue
